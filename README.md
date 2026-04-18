@@ -24,7 +24,7 @@ Ask a question like **"What is the stunting rate by wealth quintile in Kenya?"**
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/ipums-dhs-skill.git
+git clone https://github.com/ally-rome/ipums-dhs-skill.git
 cd ipums-dhs-skill
 pip install -r requirements.txt
 export IPUMS_API_KEY=your_api_key_here
