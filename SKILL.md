@@ -1,5 +1,7 @@
 # IPUMS DHS Microdata
 
+Trigger: /dhs-ipums
+
 A Claude Code skill that computes custom statistics from IPUMS DHS microdata using natural language. Unlike the StatCompiler skill which returns pre-computed indicators, this skill downloads individual-level survey data and computes weighted statistics — enabling cross-tabulations and variables that StatCompiler doesn't offer.
 
 ## Examples
