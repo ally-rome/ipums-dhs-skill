@@ -64,7 +64,23 @@ The script auto-detects whether a variable is categorical or continuous from the
 
 Follow these steps in order for every new question. Do not skip steps or use cached knowledge from previous queries.
 
-1. **Search the Guide first.** Search references/dhs_guide_indicators.json for the user's topic. If a matching indicator is found, use its definition, computation type, DHS file, and DHS variable names. Map the DHS file to the IPUMS unit using: IR=women, KR=children, PR=household_members, HR=household_members, MR=men, BR=births.
+1. **Search the Guide first.** Search references/dhs_guide_indicators.json for the user's topic using this exact snippet — do not rely on your own knowledge of field names, as entries use `title` not `indicator_name`:
+
+   ```
+   python3 -c "
+   import json
+   data = json.loads(open('references/dhs_guide_indicators.json').read())
+   keyword = 'stunt'  # replace with your keyword
+   for entry in data:
+       if keyword in json.dumps(entry).lower():
+           print(entry.get('title', ''))
+           print(json.dumps(entry, indent=2))
+           print('---')
+   "
+   ```
+
+   If a matching indicator is found, use its `dhs_file`, `dhs_variable_names`, `computation_type`, `numerator`, `denominator`, and `missing_values` fields to determine the correct methodology. Map the DHS file to the IPUMS unit using: IR=women, KR=children, PR=household_members, HR=household_members, MR=men, BR=births.
+
 
    **Then look up the IPUMS variable name.** The Guide gives DHS variable names (e.g. v511), but the extract API needs IPUMS names (e.g. AGEFRSTMAR). To translate, search dhs_availability.json for the entry whose dhs_source matches:
 
