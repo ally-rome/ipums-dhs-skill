@@ -81,6 +81,8 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    If a matching indicator is found, use its `dhs_file`, `dhs_variable_names`, `computation_type`, `numerator`, `denominator`, and `missing_values` fields to determine the correct methodology. Map the DHS file to the IPUMS unit using: IR=women, KR=children, PR=household_members, HR=household_members, MR=men, BR=births.
 
+   **Thresholds from the Guide's `numerator` field** (e.g. `hc70 < -200`) are raw stored integers — do not pass them to `--below`. The script auto-scales variables at runtime, so `--below` always takes human-readable units. Use the CLI docs example as the reference (`--below -2` for stunting), not the raw value from the Guide.
+
 
    **Then look up the IPUMS variable name.** The Guide gives DHS variable names (e.g. v511), but the extract API needs IPUMS names (e.g. AGEFRSTMAR). To translate, search dhs_availability.json for the entry whose dhs_source matches:
 
@@ -97,17 +99,17 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    **Do not skip this step. Do not use codebook keyword search or prior knowledge as a substitute when the Guide provides a DHS variable name. The DHS file → unit mapping above is authoritative — do not let CLI examples or other documentation in this file override it.**
 
-2. **Fall back to codebook search.** If no match in the Guide, search the codebook files in references/dhs_codebook_{unit}.md. If the user specifies a unit, search that codebook. If not, search all five and ask which unit to use.
+3. **Fall back to codebook search.** If no match in the Guide, search the codebook files in references/dhs_codebook_{unit}.md. If the user specifies a unit, search that codebook. If not, search all five and ask which unit to use.
 
-3. **Confirm the variable.** Show the user what variable you found and briefly describe what it measures. If you found multiple plausible variables, list them and ask. If there's one obvious choice, state what you're using and proceed.
+4. **Confirm the variable.** Show the user what variable you found and briefly describe what it measures. If you found multiple plausible variables, list them and ask. If there's one obvious choice, state what you're using and proceed.
 
-4. **Search the same unit's codebook for the breakdown variable** (e.g. wealth quintile, education, urban/rural). Don't assume breakdown variable names are the same across units — WEALTHQ in children vs WEALTHQHH in household_members.
+5. **Search the same unit's codebook for the breakdown variable** (e.g. wealth quintile, education, urban/rural). Don't assume breakdown variable names are the same across units — WEALTHQ in children vs WEALTHQHH in household_members.
 
    **Household-level statistics:** When the user asks about households (e.g., "percentage of households with improved water," "household electricity access"), use the household_members unit with `--filter HHLINENO=1` to keep only household heads. Without this filter, each household is counted once per member, overweighting large households. This applies to any indicator where the unit of interest is the household, not the individual. (See: https://www.idhsdata.org/idhs/user_know.shtml)
 
-5. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
+6. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
 
-6. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
+7. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
 
 ## Indicators this tool cannot compute
 
