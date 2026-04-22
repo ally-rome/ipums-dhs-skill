@@ -33,12 +33,12 @@ python3 scripts/ipums_dhs.py search "height for age"
 
 # Compute a table with weighted statistics
 python3 scripts/ipums_dhs.py table \
-  --country KE \
+  --country <COUNTRY_CODE> \
   --survey latest \
-  --variables HWHAZWHO \
-  --unit children \
-  --by WEALTHQ \
-  --below -2
+  --variables <IPUMS_VARIABLE_FROM_STEP_1> \
+  --unit <UNIT_FROM_DHS_FILE_MAPPING> \
+  --by <BREAKDOWN_VARIABLE_FROM_STEP_4> \
+  --below <THRESHOLD>
 ```
 
 ### table command arguments
@@ -79,7 +79,7 @@ Follow these steps in order for every new question. Do not skip steps or use cac
    "
    ```
 
-   **Do not skip this step. Do not use codebook keyword search or prior knowledge as a substitute when the Guide provides a DHS variable name.**
+   **Do not skip this step. Do not use codebook keyword search or prior knowledge as a substitute when the Guide provides a DHS variable name. The DHS file → unit mapping above is authoritative — do not let CLI examples or other documentation in this file override it.**
 
 2. **Fall back to codebook search.** If no match in the Guide, search the codebook files in references/dhs_codebook_{unit}.md. If the user specifies a unit, search that codebook. If not, search all five and ask which unit to use.
 
