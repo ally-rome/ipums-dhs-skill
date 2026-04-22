@@ -24,22 +24,21 @@ Ask a question like **"What is the stunting rate by wealth quintile in Kenya?"**
 ### Setup
 
 ```bash
-git clone https://github.com/ally-rome/ipums-dhs-skill.git
-cd ipums-dhs-skill
-pip install -r requirements.txt
+git clone https://github.com/ally-rome/ipums-dhs-skill.git ~/.claude/skills/dhs-ipums
+pip install -r ~/.claude/skills/dhs-ipums/requirements.txt
 export IPUMS_API_KEY=your_api_key_here
 ```
 
 ### Usage with Claude Code
 
-Install as a Claude Code skill, then ask questions in natural language:
+Install as a Claude Code skill, then invoke with `/dhs-ipums`:
 
-- "What is the stunting rate by wealth quintile in Kenya?"
-- "What percentage of households in Malawi have electricity?"
-- "Contraceptive use by education level in Nigeria"
-- "Vaccination coverage in Ethiopia, save to xlsx"
-- "Median years of education for women in Ghana by wealth quintile"
-- "Compare stunting across Kenya surveys over time, save to xlsx"
+- `/dhs-ipums stunting rate by wealth quintile in Kenya`
+- `/dhs-ipums percentage of households in Malawi with electricity`
+- `/dhs-ipums vaccination coverage in Tanzania, save to xlsx`
+- `/dhs-ipums contraceptive use by education level in Nigeria`
+- `/dhs-ipums median years of education for women in Ghana by wealth quintile`
+- `/dhs-ipums compare stunting across Kenya surveys over time, save to xlsx`
 
 To get an Excel file with formatted tables and replication documentation, include "save to xlsx" or "save to Excel" in your question.
 
