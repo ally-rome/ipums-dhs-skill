@@ -36,6 +36,13 @@ export IPUMS_API_KEY=your_api_key_here
 git clone https://github.com/stevenbrownstone-givewell/claude-statcompiler.git ~/.claude/skills/dhs-data
 ```
 
+### Updating
+
+```bash
+cd ~/.claude/skills/dhs-ipums
+git pull
+```
+
 ## How It Works
 
 ### Finding the right variable
