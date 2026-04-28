@@ -12,18 +12,18 @@ A Claude Code skill that queries IPUMS DHS individual-level survey microdata to 
 
 ## Reference Files
 
-**Codebooks** — Variable names, labels, and topic groups, scraped from the IPUMS DHS variable browser. One file per unit of analysis:
+**Stata indicator index:**
+- `references/dhs_stata_indicators.json` — 1,225 indicators from the DHS Code Share Project (github.com/DHSProgram/DHS-Indicators-Stata). Each entry includes the Stata variable name, human-readable label, chapter, source `.do` file, DHS file type, and (for ~85% of indicators) pre-resolved `dhs_variables` and `ipums_variables` lists. This is the primary lookup for variable identification. The ~15% without resolved variables (187 indicators) are mostly domestic violence indicators whose computation code isn't in the public repo, demographic rates computed via life table methods, and xlsx/code mismatches. These fall back to codebook search.
+
+**Availability and DHS source mapping:**
+- `references/dhs_availability.json` — Per-variable country/year availability and DHS source variable names for all IPUMS DHS variables. Enables smart sample selection (jumping directly to the correct survey year) and maps between DHS recode names (e.g., hc70) and IPUMS variable names (e.g., HWCHAZWHO).
+
+**Codebooks** — Variable names, labels, and topic groups, scraped from the IPUMS DHS variable browser. One file per unit of analysis (~16,500 unique variables total; counts below include cross-unit duplicates):
 - `references/dhs_codebook_women.md` — 9,270 variables
 - `references/dhs_codebook_children.md` — 11,146 variables
 - `references/dhs_codebook_births.md` — 7,899 variables
 - `references/dhs_codebook_men.md` — 3,741 variables
 - `references/dhs_codebook_household_members.md` — 2,284 variables
-
-**Availability and DHS source mapping:**
-- `references/dhs_availability.json` — Per-variable country/year availability and DHS source variable names for all IPUMS DHS variables. Enables smart sample selection (jumping directly to the correct survey year) and maps between DHS recode names (e.g., hc70) and IPUMS variable names (e.g., HWCHAZWHO).
-
-**Stata indicator index:**
-- `references/dhs_stata_indicators.json` — 1,225 indicators from the DHS Code Share Project (github.com/DHSProgram/DHS-Indicators-Stata). Each entry includes the Stata variable name, human-readable label, chapter, source `.do` file, DHS file type, and (for ~85% of indicators) pre-resolved `dhs_variables` and `ipums_variables` lists. Primary lookup for variable identification. Built by `scripts/build_stata_indicator_index.py` and enriched by `scripts/extract_stata_dhs_vars.py`.
 
 **Sample IDs:**
 - `references/dhs_sample_ids.md` — Sample IDs from the IPUMS API.
@@ -37,7 +37,7 @@ A Claude Code skill that queries IPUMS DHS individual-level survey microdata to 
 
 ## How the IPUMS Extract API Works
 
-Extracts are asynchronous: submit a request specifying samples and variables, poll until status is "completed", then download.
+Extracts are asynchronous: submit a request specifying samples and variables, poll until status is "completed", then download. The script uses raw `requests.post()` to `https://api.ipums.org/extracts` because ipumspy's `submit_extract()` does not work for DHS as of v0.7.0 (it sends `attachedCharacteristics: []` which the DHS API rejects). If ipumspy releases a new version, test whether `submit_extract()` works for `collection="dhs"` before assuming this workaround is still needed.
 
 There is no metadata API for DHS microdata. Variable names and descriptions must be looked up in the codebook files or on the IPUMS DHS website. Sample IDs can be listed via `ipumspy.get_all_sample_info("dhs")`.
 
@@ -60,41 +60,6 @@ Examples: `ke2022ir` (Kenya 2022 Women), `ng2018kr` (Nigeria 2018 Children)
 
 You cannot combine units in a single extract. PERWEIGHT does not need dividing by 1,000,000 in IPUMS DHS (unlike raw DHS files).
 
-## Extract Submission
-
-ipumspy's `submit_extract()` does not work for DHS as of v0.7.0. It sends `attachedCharacteristics: []` which the DHS API rejects. The script uses raw `requests.post()` instead:
-
-```python
-import requests, os
-
-payload = {
-    "description": "...",
-    "dataFormat": "csv",
-    "dataStructure": {"rectangular": {"on": "P"}},
-    "samples": {"ke2022ir": {}},
-    "variables": {"HWHAZWHO": {}, "PERWEIGHT": {}},
-    "collection": "dhs",
-    "version": 2,
-}
-resp = requests.post(
-    "https://api.ipums.org/extracts",
-    params={"collection": "dhs", "version": 2},
-    json=payload,
-    headers={"Authorization": os.environ["IPUMS_API_KEY"]},
-)
-extract_id = resp.json()["number"]
-```
-
-Poll status: `GET https://api.ipums.org/extracts/{id}` with same params/headers until `status == "completed"`.
-
-Download URL is at `response["downloadLinks"]["data"]["url"]`. The file is `.csv.gz` — open with `gzip.open(path, "rt")`, not zipfile.
-
-If ipumspy releases a new version, test whether `submit_extract()` works for `collection="dhs"` before assuming this workaround is still needed.
-
-ipumspy is still used for:
-- `get_all_sample_info("dhs")` to list available samples
-- `readers` module to read downloaded data
-
 ## DHS File to IPUMS Unit Mapping
 
 When dhs_stata_indicators.json or other DHS references specify a file type, map it to the IPUMS unit:
@@ -108,11 +73,14 @@ When dhs_stata_indicators.json or other DHS references specify a file type, map 
 | MR | men |
 | BR | births |
 
+## Cross-Reference with StatCompiler
+
+After computing IPUMS microdata results, the skill also queries the StatCompiler skill (/dhs-data) to retrieve the official published DHS indicator value for the same country and survey year. This serves as built-in validation — if both sources agree, the computation is likely correct. If they differ, the skill notes the discrepancy and suggests possible reasons. The StatCompiler skill must be installed at `~/.claude/skills/dhs-data`. See: https://github.com/stevenbrownstone-givewell/claude-statcompiler
+
 ## Key References
 
 - IPUMS DHS: https://www.idhsdata.org
 - IPUMS API docs: https://developer.ipums.org/docs/v2/
-- ipumspy docs: https://ipumspy.readthedocs.io/
 - DHS variable browser: https://www.idhsdata.org/idhs-action/variables/group
 - Guide to DHS Statistics (DHS-8): https://www.dhsprogram.com/pubs/pdf/DHSG1/Guide_to_DHS_Statistics_DHS-8.pdf
 - What Every IPUMS-DHS User Should Know: https://www.idhsdata.org/idhs/user_know.shtml
@@ -125,7 +93,3 @@ When dhs_stata_indicators.json or other DHS references specify a file type, map 
 - **Household-level statistics** require `--filter HHLINENO=1` to avoid overweighting large households.
 - **Older surveys** may have different respondent universes (e.g., ever-married women only). Compare across years with caution.
 - **Country access** must be approved per-country through the DHS Program. A 403 error means the user needs to request access at https://www.idhsdata.org.
-
-## Cross-Reference with StatCompiler
-
-After computing IPUMS microdata results, the skill also queries Steven's StatCompiler skill (/dhs-data) to retrieve the official published DHS indicator value for the same country and survey year. This serves as built-in validation — if both sources agree, the computation is likely correct. The StatCompiler skill must be installed at ~/.claude/skills/dhs-data. See: https://github.com/stevenbrownstone-givewell/claude-statcompiler
