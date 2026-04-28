@@ -16,7 +16,7 @@ A Claude Code skill that computes custom statistics from IPUMS DHS microdata usi
 
 ## What it does
 
-1. **Identifies the right variables** by first searching the Guide to DHS Statistics (274 standard indicators with methodology) and then searching ~16,500 unique IPUMS DHS variable names across five units of analysis (women, children, births, household members, men)
+1. **Identifies the right variables** by first searching 1,225 DHS Code Share indicators (with per-indicator DHS variable names and IPUMS mappings already resolved) and then searching ~16,500 unique IPUMS DHS variable names across five units of analysis (women, children, births, household members, men)
 2. **Finds the right survey** for the requested country, using pre-scraped availability data to jump directly to the correct survey year
 3. **Submits an extract request** to the IPUMS API and waits for the data (typically 30-60 seconds)
 4. **Downloads and loads the microdata** with automatic missing-value detection from the DDI codebook
@@ -64,52 +64,62 @@ The script auto-detects whether a variable is categorical or continuous from the
 
 Follow these steps in order for every new question. Do not skip steps or use cached knowledge from previous queries.
 
-1. **Search the Guide first.** Search references/dhs_guide_indicators.json for the user's topic using this exact snippet — do not rely on your own knowledge of field names, as entries use `title` not `indicator_name`:
+1. **Search dhs_stata_indicators.json first.** This file has 1,225 indicators from the DHS Code Share Project with per-indicator DHS variable names and IPUMS mappings already resolved. Search it by matching the user's topic against the `label` field:
 
-   ```
-   python3 -c "
+   ```python
    import json
-   data = json.loads(open('references/dhs_guide_indicators.json').read())
-   keyword = 'stunt'  # replace with your keyword
-   for entry in data:
-       if keyword in json.dumps(entry).lower():
-           print(entry.get('title', ''))
-           print(json.dumps(entry, indent=2))
-           print('---')
-   "
+   data = json.loads(open('references/dhs_stata_indicators.json').read())
+   query = "stunting"  # replace with topic keyword
+   matches = [d for d in data if query.lower() in (d.get('label') or '').lower()]
+   for m in matches[:10]:
+       print(f"{m['stata_var']:30s} | {m['label']}")
+       print(f"  dhs_file={m['dhs_file']}  do_file={m['do_file']}")
+       print(f"  ipums_variables={m.get('ipums_variables', [])[:5]}")
+       print(f"  dhs_variables={m.get('dhs_variables', [])[:5]}")
    ```
 
-   If a matching indicator is found, use its `dhs_file`, `dhs_variable_names`, `computation_type`, `numerator`, `denominator`, and `missing_values` fields to determine the correct methodology. Map the DHS file to the IPUMS unit using: IR=women, KR=children, PR=household_members, HR=household_members, MR=men, BR=births.
+   **If the indicator has `ipums_variables` populated**, use those directly as the IPUMS variable names for the extract — no further lookup needed.
 
-   **Thresholds from the Guide's `numerator` field** (e.g. `hc70 < -200`) are raw stored integers — do not pass them to `--below`. The script auto-scales variables at runtime, so `--below` always takes human-readable units. Use the CLI docs example as the reference (`--below -2` for stunting), not the raw value from the Guide.
+   **If the indicator has only `dhs_variables`** (no IPUMS mapping), look up each DHS variable name in dhs_availability.json:
 
-
-   **Then look up the IPUMS variable name.** The Guide gives DHS variable names (e.g. v511), but the extract API needs IPUMS names (e.g. AGEFRSTMAR). To translate, search dhs_availability.json for the entry whose dhs_source matches:
-
-   ```
-   python3 -c "
+   ```python
    import json
-   data = json.loads(open('references/dhs_availability.json').read())
-   target = 'v511'  # replace with the DHS variable name from the Guide
-   for ipums_name, entry in data.items():
-       if (entry.get('dhs_source') or '').lower() == target.lower():
+   avail = json.loads(open('references/dhs_availability.json').read())
+   dhs_var = 'v511'  # replace with the DHS variable name from dhs_variables
+   for ipums_name, entry in avail.items():
+       if (entry.get('dhs_source') or '').lower() == dhs_var.lower():
            print(ipums_name)
-   "
    ```
 
-   **Do not skip this step. Do not use codebook keyword search or prior knowledge as a substitute when the Guide provides a DHS variable name. The DHS file → unit mapping above is authoritative — do not let CLI examples or other documentation in this file override it.**
+   **Map `dhs_file` to the IPUMS unit:** IR=women, KR=children, PR=household_members, HR=household_members, MR=men, BR=births. This mapping is authoritative — do not let CLI examples or other documentation override it.
 
-3. **Fall back to codebook search.** If no match in the Guide, search the codebook files in references/dhs_codebook_{unit}.md. If the user specifies a unit, search that codebook. If not, search all five and ask which unit to use.
+   **Note the `do_file` field** — you will need it for the replication block in the output.
 
-4. **Confirm the variable.** Show the user what variable you found and briefly describe what it measures. If you found multiple plausible variables, list them and ask. If there's one obvious choice, state what you're using and proceed.
+   **Do not skip this step.** Do not use codebook keyword search or prior knowledge as a substitute when a matching indicator is found here.
 
-5. **Search the same unit's codebook for the breakdown variable** (e.g. wealth quintile, education, urban/rural). Don't assume breakdown variable names are the same across units — WEALTHQ in children vs WEALTHQHH in household_members.
+2. **Fall back to codebook search.** If no match in dhs_stata_indicators.json, search the codebook files in references/dhs_codebook_{unit}.md. If the user specifies a unit, search that codebook. If not, search all five and ask which unit to use.
+
+3. **Confirm the variable.** Show the user what variable you found and briefly describe what it measures. If you found multiple plausible variables, list them and ask. If there's one obvious choice, state what you're using and proceed.
+
+4. **Search the same unit's codebook for the breakdown variable** (e.g. wealth quintile, education, urban/rural). Don't assume breakdown variable names are the same across units — WEALTHQ in children vs WEALTHQHH in household_members.
 
    **Household-level statistics:** When the user asks about households (e.g., "percentage of households with improved water," "household electricity access"), use the household_members unit with `--filter HHLINENO=1` to keep only household heads. Without this filter, each household is counted once per member, overweighting large households. This applies to any indicator where the unit of interest is the household, not the individual. (See: https://www.idhsdata.org/idhs/user_know.shtml)
 
-6. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
+5. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
 
-7. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
+6. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
+
+   **Source attribution in the replication block:**
+   - If the indicator was found in dhs_stata_indicators.json (Step 1), include:
+     `Source methodology: DHS Code Share Project (https://github.com/DHSProgram/DHS-Indicators-Stata), [do_file name]`
+   - If the indicator was found via codebook search (Step 2), include:
+     `Source methodology: IPUMS DHS variable codebook (https://www.idhsdata.org)`
+
+7. **Cross-reference with StatCompiler.** After presenting the IPUMS results, also query the StatCompiler skill (/dhs-data) for the same indicator, country, and survey year. Request the most detailed breakdown available — if the IPUMS query used a breakdown by wealth, education, urban/rural, or region, request the same breakdown from StatCompiler. If StatCompiler can't match the exact breakdown, request the national-level value instead. Present both results so the user can compare:
+
+   /dhs-data [indicator] in [country] [year] by [breakdown if available]
+
+   Format the comparison as: 'StatCompiler reports X% for [indicator] in [country] [year]. Our IPUMS microdata computation shows Y%.' If the values are within a few percentage points, note that this validates the computation. If they differ, note the discrepancy and suggest possible reasons (different indicator definitions, different universe restrictions, different survey year). If StatCompiler doesn't have the indicator, note that and skip this step.
 
 ## Indicators this tool cannot compute
 
@@ -149,4 +159,4 @@ All data comes from IPUMS DHS (https://www.idhsdata.org), which provides harmoni
 
 ## Cautions
 
-**Universe comparability over time:** When showing results across multiple survey years (--survey all), always include a note that older surveys may have different respondent universes and results may not be directly comparable across all years. If the indicator was found in the Guide, also check the 'changes_over_time' field for specific known differences (e.g., ever-married women only in older surveys, different anthropometric reference standards, changed variable definitions). (See: https://www.idhsdata.org/idhs-action/faq)
+**Universe comparability over time:** When showing results across multiple survey years (--survey all), always include a note that older surveys may have different respondent universes and results may not be directly comparable across all years. Check the `notes` field in dhs_stata_indicators.json for indicator-specific caveats, and consult the Guide to DHS Statistics (https://www.dhsprogram.com/pubs/pdf/DHSG1/Guide_to_DHS_Statistics_DHS-8.pdf) for documentation of known changes across DHS phases. (See also: https://www.idhsdata.org/idhs-action/faq)
