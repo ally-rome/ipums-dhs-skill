@@ -1,14 +1,8 @@
----
-name: dhs-ipums
-description: "Compute custom statistics from IPUMS DHS survey microdata. Use when the user wants DHS health or demographics data with custom cross-tabulations, breakdowns by any variable, household-level statistics, or Excel output with replication documentation. Handles requests like stunting by wealth quintile in Kenya, contraceptive use by education in Nigeria, or household electricity access in Malawi."
-argument-hint: "<plain-language question about DHS health/demographics data>"
----
-
 # IPUMS DHS Microdata
 
 Trigger: /dhs-ipums
 
-Compute custom statistics from IPUMS DHS survey microdata using natural language. Use when the user wants DHS health or demographics data broken down by custom variables, cross-tabulations not available in StatCompiler, or Excel output with replication documentation.
+A Claude Code skill that computes custom statistics from IPUMS DHS microdata using natural language. Unlike the StatCompiler skill which returns pre-computed indicators, this skill downloads individual-level survey data and computes weighted statistics — enabling cross-tabulations and variables that StatCompiler doesn't offer.
 
 ## Examples
 - stunting rate by wealth quintile in Kenya
@@ -29,7 +23,25 @@ Compute custom statistics from IPUMS DHS survey microdata using natural language
 5. **Computes weighted statistics** using the correct DHS survey weights
 6. **Presents a formatted table** with human-readable labels and full replication documentation
 
-## table command arguments
+## CLI commands
+```bash
+# List available surveys for a country
+python3 scripts/ipums_dhs.py samples KE
+
+# Search for variables by keyword
+python3 scripts/ipums_dhs.py search "height for age"
+
+# Compute a table with weighted statistics
+python3 scripts/ipums_dhs.py table \
+  --country <COUNTRY_CODE> \
+  --survey latest \
+  --variables <IPUMS_VARIABLE_FROM_STEP_1> \
+  --unit <UNIT_FROM_DHS_FILE_MAPPING> \
+  --by <BREAKDOWN_VARIABLE_FROM_STEP_4> \
+  --below <THRESHOLD>
+```
+
+### table command arguments
 
 Required: `--country`, `--variables`, `--unit` (women, children, births, household_members, men)
 
@@ -93,7 +105,7 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    **Household-level statistics:** When the user asks about households (e.g., "percentage of households with improved water," "household electricity access"), use the household_members unit with `--filter HHLINENO=1` to keep only household heads. Without this filter, each household is counted once per member, overweighting large households. This applies to any indicator where the unit of interest is the household, not the individual. (See: https://www.idhsdata.org/idhs/user_know.shtml)
 
-5. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically. Do not run the samples command to check survey availability — the table command uses dhs_availability.json to find the correct survey automatically.
+5. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
 
 6. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
 
@@ -131,7 +143,7 @@ The tool CAN compute related but simpler measures — for example, the proportio
 | RW | Rwanda | SN | Senegal | SL | Sierra Leone |
 | NP | Nepal | ZM | Zambia | ZW | Zimbabwe |
 
-DHS uses some non-standard codes (IA=India, NM=Namibia, BU=Burundi).
+DHS uses some non-standard codes (IA=India, NM=Namibia, BU=Burundi). Run samples command to verify.
 
 ## Data source
 
