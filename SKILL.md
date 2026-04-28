@@ -1,8 +1,14 @@
+---
+name: dhs-ipums
+description: "Compute custom statistics from IPUMS DHS survey microdata. Use when the user wants DHS health or demographics data with custom cross-tabulations, breakdowns by any variable, household-level statistics, or Excel output with replication documentation. Handles requests like stunting by wealth quintile in Kenya, contraceptive use by education in Nigeria, or household electricity access in Malawi."
+argument-hint: "<plain-language question about DHS health/demographics data>"
+---
+
 # IPUMS DHS Microdata
 
 Trigger: /dhs-ipums
 
-A Claude Code skill that computes custom statistics from IPUMS DHS microdata using natural language. Unlike the StatCompiler skill which returns pre-computed indicators, this skill downloads individual-level survey data and computes weighted statistics — enabling cross-tabulations and variables that StatCompiler doesn't offer.
+Compute custom statistics from IPUMS DHS survey microdata using natural language. Use when the user wants DHS health or demographics data broken down by custom variables, cross-tabulations not available in StatCompiler, or Excel output with replication documentation.
 
 ## Examples
 - stunting rate by wealth quintile in Kenya
@@ -105,7 +111,31 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    **Household-level statistics:** When the user asks about households (e.g., "percentage of households with improved water," "household electricity access"), use the household_members unit with `--filter HHLINENO=1` to keep only household heads. Without this filter, each household is counted once per member, overweighting large households. This applies to any indicator where the unit of interest is the household, not the individual. (See: https://www.idhsdata.org/idhs/user_know.shtml)
 
-5. **Run the table command** with --survey latest. The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
+5. **Apply universe restrictions, then run the table command** with --survey latest.
+
+   Before running, check whether the matched indicator in `dhs_stata_indicators.json` has a `universe_restrictions` field. If it does, apply matching `--filter` flags and pass a `--universe` description. To translate DHS conditions to IPUMS filters:
+   - Look up each DHS variable name (e.g. `b19`, `b5`) in `dhs_availability.json` to find the IPUMS equivalent (e.g. `KIDCURAGE`, `KIDALIVE`)
+   - Convert the condition to `--filter IPUMS_VAR=VALUE` form (note: `--filter` supports only equality; range conditions like `b19>=12 & b19<=23` must be handled by adding two separate filters or using the nearest equivalent)
+   - Pass `--universe` with a human-readable description, e.g.:
+     `--universe "Living children age 12-23 months (KIDCURAGEMO >= 12 & KIDCURAGEMO <= 23, KIDALIVE == 1)"`
+   - **Always single-quote filter specs containing `>=` or `<=`** to prevent shell redirection interpretation:
+     `--filter 'KIDCURAGEMO>=12' --filter 'KIDCURAGEMO<=23'`
+
+   **Common universe restrictions and their IPUMS equivalents:**
+
+   | DHS condition | IPUMS filter | Description |
+   |---------------|--------------|-------------|
+   | `b19>=12 & b19<=23` | `KIDCURAGE >= 12 & KIDCURAGE <= 23` | Children 12–23 months |
+   | `b5==1` | `KIDALIVE == 1` | Living children only |
+   | `b4==2` | `KIDSEX == 2` | Girls only |
+   | `v502==1` | `MARSTAT == 1` | Currently married women |
+   | `hv103==1` | `SLPTHHERE == 1` | De facto household members |
+
+   Note: If the restrictions include loop-expansion artifacts (e.g. `keep if \`lvar'==\`lcat'`) or data-cleaning drops (e.g. `drop if b3_==.`), skip those — apply only restrictions that define the denominator population (age group, sex, marital status, living status).
+
+   If no universe_restrictions are present, pass `--universe "No additional universe restrictions applied (full extract after DDI missing value filtering)"`.
+
+   The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
 
 6. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
 
