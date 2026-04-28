@@ -621,15 +621,6 @@ def second_pass_inherit(indicators, parser_cache, file_index, dhs_to_ipums):
 # Main
 # ------------------------------------------------------------------
 
-# Indicators to include in before/after comparison printout
-COMPARE_VARS = [
-    "ch_pent3_either",
-    "ch_diar_antib",
-    "nt_ch_stunt",
-    "fp_cruse_pill",
-    "we_decide_all",
-]
-
 
 def main():
     local_clone = Path(os.environ.get("DHS_STATA_REPO", str(DEFAULT_LOCAL_CLONE)))
@@ -754,20 +745,6 @@ def main():
         print(f"\nDo files not found in repo ({len(unresolved)}):")
         for f in sorted(unresolved):
             print(f"  {f}")
-
-    # Before/after comparison
-    print("\n" + "=" * 70)
-    print("BEFORE / AFTER comparison (per-file → per-indicator)")
-    print("=" * 70)
-    for sv in COMPARE_VARS:
-        ind = next((x for x in indicators if x["stata_var"] == sv), None)
-        if ind is None:
-            continue
-        old = _per_file_dhs(ind.get("do_file", ""))
-        new = ind.get("dhs_variables", [])
-        print(f"\n{sv}  [{ind['do_file']}]")
-        print(f"  BEFORE ({len(old):2d}): {old}")
-        print(f"  AFTER  ({len(new):2d}): {new}")
 
     # Universe restrictions summary
     n_with_restrictions = sum(1 for ind in indicators if ind.get("universe_restrictions"))
