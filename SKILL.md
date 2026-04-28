@@ -97,7 +97,7 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    Before running, check whether the matched indicator in `dhs_stata_indicators.json` has a `universe_restrictions` field. If it does, apply matching `--filter` flags and pass a `--universe` description. To translate DHS conditions to IPUMS filters:
    - Look up each DHS variable name (e.g. `b19`, `b5`) in `dhs_availability.json` to find the IPUMS equivalent (e.g. `KIDCURAGE`, `KIDALIVE`)
-   - Convert the condition to `--filter IPUMS_VAR=VALUE` form (note: `--filter` supports only equality; range conditions like `b19>=12 & b19<=23` must be handled by adding two separate filters or using the nearest equivalent)
+   - Convert the condition to `--filter IPUMS_VAR=VALUE` form (note: `--filter` supports equality and inequality operators; range conditions like `b19>=12 & b19<=23` require two separate filters: `--filter 'KIDCURAGEMO>=12' --filter 'KIDCURAGEMO<=23'`)
    - Pass `--universe` with a human-readable description, e.g.:
      `--universe "Living children age 12-23 months (KIDCURAGEMO >= 12 & KIDCURAGEMO <= 23, KIDALIVE == 1)"`
    - **Always single-quote filter specs containing `>=` or `<=`** to prevent shell redirection interpretation:
