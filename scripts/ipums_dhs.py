@@ -886,27 +886,39 @@ def cmd_table(args: argparse.Namespace) -> None:
     weight_col = args.weight or WEIGHT_DEFAULT.get(unit, "PERWEIGHT")
     variables_requested = [v.strip() for v in args.variables.split(",")]
 
-    # Parse --filter VARIABLE=VALUE
-    filter_var: Optional[str] = None
-    filter_val = None
-    if args.filter_spec:
-        if "=" not in args.filter_spec:
-            sys.exit(f"--filter must be in VARIABLE=VALUE form, got: {args.filter_spec!r}")
-        _fv, _fval_raw = args.filter_spec.split("=", 1)
-        filter_var = _fv.strip().upper()
-        try:
-            filter_val = int(_fval_raw)
-        except ValueError:
-            try:
-                filter_val = float(_fval_raw)
-            except ValueError:
-                filter_val = _fval_raw
+    # Parse --filter specs. Each spec is VARIABLE[>=<=]VALUE; multiple are ANDed together.
+    _FILTER_RE = re.compile(r"^([A-Za-z_]\w*)(>=|<=|>|<|=)(-?[\d.]+)$")
+    _FILTER_OPS = {
+        "==": lambda s, v: s == v,
+        ">=": lambda s, v: s >= v,
+        "<=": lambda s, v: s <= v,
+        ">":  lambda s, v: s > v,
+        "<":  lambda s, v: s < v,
+    }
 
-    # Build full variable list for extract: always include weight + by variable + filter variable
+    def _parse_filter(spec: str) -> dict:
+        m = _FILTER_RE.match(spec.strip())
+        if not m:
+            sys.exit(
+                f"--filter must be in VARIABLE[>=<=]VALUE form (e.g. KIDALIVE=1 or "
+                f"KIDCURAGEMO>=12), got: {spec!r}"
+            )
+        var, op, val_raw = m.group(1).upper(), m.group(2), m.group(3)
+        op = "==" if op == "=" else op  # normalise single = to ==
+        try:
+            val: float | int = int(val_raw)
+        except ValueError:
+            val = float(val_raw)
+        return {"var": var, "op": op, "val": val}
+
+    filters = [_parse_filter(s) for s in (args.filter_specs or [])]
+    filter_vars = list(dict.fromkeys(f["var"] for f in filters))
+
+    # Build full variable list for extract: weight + by variable + all filter variables
     extract_vars = list(dict.fromkeys(
         variables_requested + [weight_col]
         + ([args.by] if args.by else [])
-        + ([filter_var] if filter_var else [])
+        + filter_vars
     ))
 
     # 1. Build ordered candidate list (newest first) for fallback retries.
@@ -1004,12 +1016,13 @@ def cmd_table(args: argparse.Namespace) -> None:
     df = load_extract(filepath)
     print(f"  Loaded {len(df):,} rows × {len(df.columns)} columns")
 
-    # 5a. Apply --filter if specified
-    if filter_var:
-        if filter_var not in df.columns:
-            sys.exit(f"Filter variable {filter_var!r} not found in extract columns.")
-        df = df[df[filter_var] == filter_val].copy()
-        print(f"  Applied filter: {filter_var} == {filter_val} ({len(df):,} rows remaining)")
+    # 5a. Apply --filter(s) — each filter is ANDed in sequence
+    for f in filters:
+        var, op, val = f["var"], f["op"], f["val"]
+        if var not in df.columns:
+            sys.exit(f"Filter variable {var!r} not found in extract columns.")
+        df = df[_FILTER_OPS[op](df[var], val)].copy()
+        print(f"  Applied filter: {var} {op} {val} ({len(df):,} rows remaining)")
 
     # Parse the DDI XML codebook that IPUMS ships alongside every extract.
     # It contains the exact sentinel codes (NIU, "don't know", flagged, etc.)
@@ -1199,6 +1212,21 @@ def cmd_table(args: argparse.Namespace) -> None:
                 "by_code": _code_details,
             }
 
+    # Build universe description for the replication block.  Precedence:
+    #   1. --universe flag (explicit human-readable text from the caller)
+    #   2. --filter(s) were applied: join all conditions
+    #   3. Neither: state that no restrictions were applied
+    if args.universe:
+        universe_description = args.universe
+    elif filters:
+        parts = [f"{f['var']} {f['op']} {f['val']}" for f in filters]
+        universe_description = " & ".join(parts)
+    else:
+        universe_description = (
+            "No additional universe restrictions applied "
+            "(full extract after DDI missing value filtering)"
+        )
+
     _print_replication(
         sample_ids=sample_ids,
         country_name=country_name,
@@ -1207,9 +1235,8 @@ def cmd_table(args: argparse.Namespace) -> None:
         extract_vars=extract_vars,
         variables_requested=variables_requested,
         replication_vars=replication_vars,
-        filter_var=filter_var,
-        filter_val=filter_val,
         median=args.median,
+        universe_description=universe_description,
     )
 
     if args.output and xlsx_results:
@@ -1226,9 +1253,8 @@ def cmd_table(args: argparse.Namespace) -> None:
             variables_requested=variables_requested,
             replication_vars=replication_vars,
             missing_stats=missing_stats,
-            filter_var=filter_var,
-            filter_val=filter_val,
             median=args.median,
+            universe_description=universe_description,
         )
         print(f"  Saved to {out_path}")
 
@@ -1296,6 +1322,7 @@ def _write_xlsx_output(
     filter_var: Optional[str] = None,
     filter_val=None,
     median: bool = False,
+    universe_description: Optional[str] = None,
 ) -> str:
     """
     Write query results and provenance to a formatted Excel workbook.
@@ -1462,9 +1489,8 @@ def _write_xlsx_output(
         ["Sample", sample_line],
         ["Weight", weight_col],
         ["Unit of analysis", unit],
+        ["Universe", universe_description],
     ]
-    if filter_var is not None:
-        rep_rows.append(["Filter", f"{filter_var} == {filter_val}"])
     if median:
         rep_rows.append(["Statistic", "weighted median"])
     for v in extract_vars:
@@ -1564,6 +1590,7 @@ def _print_replication(
     filter_var: Optional[str] = None,
     filter_val=None,
     median: bool = False,
+    universe_description: Optional[str] = None,
 ) -> None:
     """Print a replication citation and variable details block."""
     unit_desc = UNIT_DESCRIPTIONS.get(unit, unit)
@@ -1581,8 +1608,7 @@ def _print_replication(
     print(f"Sample: {sample_line}")
     print(f"Weight: {weight_col}")
     print(f"Unit of analysis: {unit}")
-    if filter_var is not None:
-        print(f"Filter: {filter_var} == {filter_val}")
+    print(f"Universe: {universe_description}")
     if median:
         print("Statistic: weighted median")
 
@@ -1663,10 +1689,14 @@ def main() -> None:
     p_table.add_argument("--by", default=None, help="Cross-tabulate by this variable")
     p_table.add_argument(
         "--filter",
+        action="append",
         default=None,
-        dest="filter_spec",
-        metavar="VARIABLE=VALUE",
-        help="Filter rows before computing (e.g. --filter HHLINENO=1 for household heads only)",
+        dest="filter_specs",
+        metavar="VARIABLE[>=<=]VALUE",
+        help=(
+            "Filter rows before computing. Supports =, >=, <=, >, <. "
+            "Repeatable: --filter KIDALIVE=1 --filter KIDCURAGEMO>=12 --filter KIDCURAGEMO<=23"
+        ),
     )
     p_table.add_argument("--output", default=None, help="Save results to CSV file")
     p_table.add_argument("--plot", action="store_true", help="Generate a bar chart")
@@ -1700,6 +1730,16 @@ def main() -> None:
         action="store_true",
         dest="no_ddi_filter",
         help="Disable automatic DDI-based missing value filtering",
+    )
+    p_table.add_argument(
+        "--universe",
+        default=None,
+        metavar="DESCRIPTION",
+        help=(
+            "Human-readable description of the universe/denominator for the replication block "
+            "(e.g. 'Living children age 12-23 months'). "
+            "If omitted, constructed from --filter when present, or states no restriction."
+        ),
     )
 
     args = parser.parse_args()
