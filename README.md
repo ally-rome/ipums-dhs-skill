@@ -58,7 +58,7 @@ The script downloads microdata via the IPUMS DHS extract API, then:
 
 ### Cross-referencing with StatCompiler
 
-After presenting IPUMS results, the skill queries the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler) for the same indicator, country, and survey year. If both sources produce similar values, the computation is validated. If they differ, possible reasons are noted. The StatCompiler skill must be installed at `~/.claude/skills/dhs-data` for this to work.
+After presenting IPUMS results, the skill queries the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler) for the same indicator, country, and survey year to validate the output. The StatCompiler skill must be installed at `~/.claude/skills/dhs-data` for this to work.
 
 ### Output
 
