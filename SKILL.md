@@ -29,25 +29,7 @@ Compute custom statistics from IPUMS DHS survey microdata using natural language
 5. **Computes weighted statistics** using the correct DHS survey weights
 6. **Presents a formatted table** with human-readable labels and full replication documentation
 
-## CLI commands
-```bash
-# List available surveys for a country
-python3 scripts/ipums_dhs.py samples KE
-
-# Search for variables by keyword
-python3 scripts/ipums_dhs.py search "height for age"
-
-# Compute a table with weighted statistics
-python3 scripts/ipums_dhs.py table \
-  --country <COUNTRY_CODE> \
-  --survey latest \
-  --variables <IPUMS_VARIABLE_FROM_STEP_1> \
-  --unit <UNIT_FROM_DHS_FILE_MAPPING> \
-  --by <BREAKDOWN_VARIABLE_FROM_STEP_4> \
-  --below <THRESHOLD>
-```
-
-### table command arguments
+## table command arguments
 
 Required: `--country`, `--variables`, `--unit` (women, children, births, household_members, men)
 
@@ -56,7 +38,7 @@ Optional:
 - `--by`: cross-tabulate by this variable
 - `--below`: compute proportion below threshold (e.g. -2 for stunting); forces continuous mode
 - `--median`: compute weighted median instead of weighted mean for continuous variables
-- `--filter`: filter rows before computing (e.g. `--filter HHLINENO=1` for household heads only)
+- `--filter`: filter rows before computing. Supports equality (`HHLINENO=1`) and inequality operators (`KIDCURAGEMO>=12`, `KIDCURAGEMO<=23`). Use single quotes around filters with `>=` or `<=` to prevent shell redirection.
 - `--weight`: override default weight (usually auto-selected per unit)
 - `--scale`: manually set scale divisor (usually auto-detected)
 - `--missing-ge`: manually set missing-value threshold (usually auto-detected from DDI)
@@ -135,7 +117,7 @@ Follow these steps in order for every new question. Do not skip steps or use cac
 
    If no universe_restrictions are present, pass `--universe "No additional universe restrictions applied (full extract after DDI missing value filtering)"`.
 
-   The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically.
+   The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically. Do not run the samples command to check survey availability — the table command uses dhs_availability.json to find the correct survey automatically.
 
 6. **Present results** by showing the EXACT tables the script outputs. Do not collapse, combine, regroup, or rename categories. Do not add calculated columns by summing categories together. Do not round N values. Do not add a summary paragraph interpreting or combining the results. Present only the tables as the script outputs them.
 
@@ -173,7 +155,7 @@ The tool CAN compute related but simpler measures — for example, the proportio
 | RW | Rwanda | SN | Senegal | SL | Sierra Leone |
 | NP | Nepal | ZM | Zambia | ZW | Zimbabwe |
 
-DHS uses some non-standard codes (IA=India, NM=Namibia, BU=Burundi). Run samples command to verify.
+DHS uses some non-standard codes (IA=India, NM=Namibia, BU=Burundi).
 
 ## Data source
 
