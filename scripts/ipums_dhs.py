@@ -1052,6 +1052,11 @@ def cmd_table(args: argparse.Namespace) -> None:
             print(f"  {var}: filtered {n_dropped_ddi:,} DDI missing rows "
                   f"(codes: {sorted(ddi_vals)})")
 
+        if args.by and not args.no_ddi_filter:
+            _by_missing = ddi_missing.get(args.by, set())
+            if _by_missing:
+                working = working[~working[args.by].isin(_by_missing)]
+
         if args.missing_ge is not None:
             n_before = working[var].notna().sum()
             working.loc[working[var] >= args.missing_ge, var] = float("nan")
