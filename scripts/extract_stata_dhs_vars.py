@@ -142,8 +142,10 @@ class DoFileParser:
     file can both contribute to the graph — root defines older indicators,
     DHS8/ defines newer ones.
 
-    created_vars: set of all variables defined across all versions
-    deps[var]:    union of identifier tokens from all versions' gen/replace/recode lines
+    created_vars:    set of all variables defined across all versions
+    deps[var]:       union of identifier tokens from all versions' gen/replace/recode lines
+    replace_conds:   varname -> {str_value -> [condition_str]} for 'replace VAR=N if COND'
+    _raw_keepdrops:  list of raw {type, condition, description} before resolution
     """
 
     def __init__(self, paths):
@@ -151,6 +153,8 @@ class DoFileParser:
             paths = [paths]
         self.created_vars: set = set()
         self.deps: dict = {}   # varname -> set[str]
+        self.replace_conds: dict = {}  # varname -> {str_val -> [condition_str]}
+        self._raw_keepdrops: list = []  # pre-resolution keep/drop entries
         # Tracks the variable most recently passed to sum/summarize/mean so that
         # a subsequent 'gen Y = r(mean)' can be linked back to its source.
         self._last_summarized: str = ""
@@ -286,6 +290,16 @@ class DoFileParser:
         # replace target = expr [if cond]
         m = re.match(r"replace\s+(\w+)\s*=\s*(.+)", line, re.IGNORECASE)
         if m:
+            var = m.group(1).lower()
+            rhs = m.group(2)
+            # Track 'replace VAR=N if COND' for universe restriction resolution.
+            # Only store simple numeric values (e.g. agegroup=1) — skips expressions.
+            if_m = re.search(r"\s+if\s+(.+)$", rhs, re.IGNORECASE)
+            if if_m:
+                val_part = rhs[: if_m.start()].strip()
+                cond_part = if_m.group(1).strip()
+                if re.match(r"^-?\d+(\.\d+)?$", val_part):
+                    self.replace_conds.setdefault(var, {}).setdefault(val_part, []).append(cond_part)
             self._record(m.group(1), m.group(2))
             return
 
@@ -329,10 +343,111 @@ class DoFileParser:
     def _parse(self, text: str) -> None:
         text = self._remove_block_comments(text)
         text = self._join_continuations(text)
+        self._extract_universe(text)  # scan raw lines for keep/drop before stripping
         lines = [self._strip_line_comment(l) for l in text.split("\n")]
         lines = self._expand_loops(lines)
         for line in lines:
             self._parse_line(line)
+
+    # ------------------------------------------------------------------
+    # Universe restriction extraction
+    # ------------------------------------------------------------------
+
+    def _extract_universe(self, text: str) -> None:
+        """Scan raw (pre-stripped) lines for keep if / drop if with preceding comments.
+
+        Operates on text after block-comment removal and continuation-joining so that
+        * comment lines are still visible (they become blank after _strip_line_comment).
+        Loop expansion is applied so loop-body keep/drop statements are captured too.
+        """
+        lines = text.split("\n")
+        lines = self._expand_loops(lines)
+
+        prev_comment: str = ""
+        for line in lines:
+            stripped = line.strip()
+
+            # * comment line — capture as potential description for following keep/drop
+            if stripped.startswith("*"):
+                comment_text = re.sub(r"^\*+\s*", "", stripped).strip()
+                if comment_text:
+                    prev_comment = comment_text
+                continue
+
+            # Separate inline // comment from the command
+            idx = stripped.find("//")
+            inline_comment = stripped[idx + 2:].strip() if idx >= 0 else ""
+            clean = stripped[:idx].strip() if idx >= 0 else stripped
+
+            if not clean:
+                continue  # blank line — preserve prev_comment
+
+            # Strip prefixes (cap/qui/noi/by) so 'cap keep if ...' is matched
+            clean_cmd = _PREFIX_RE.sub("", clean).strip()
+
+            m = re.match(r"^(keep|drop)\s+if\s+(.+)", clean_cmd, re.IGNORECASE)
+            if m:
+                type_ = m.group(1).lower()
+                condition = m.group(2).strip()
+                description = inline_comment or prev_comment or None
+                self._raw_keepdrops.append({
+                    "type": type_,
+                    "condition": condition,
+                    "description": description,
+                })
+                # Don't reset prev_comment: adjacent keep if lines share a comment header
+            else:
+                prev_comment = ""  # non-keep/drop, non-comment resets context
+
+    def _resolve_condition(self, condition: str) -> str:
+        """Resolve intermediate variable == N patterns to underlying DHS conditions.
+
+        Example: 'agegroup==1' becomes '(b19>=12 & b19<=23)' when the parser has
+        seen 'replace agegroup=1 if b19>=12 & b19<=23'.
+
+        Prefers candidates whose conditions contain DHS variable patterns (e.g. b19)
+        over those referencing further Stata intermediates (e.g. age). Recurses one
+        additional level so a two-hop chain (agegroup → age → b19) is fully resolved.
+        """
+        def _has_dhs_var(s: str) -> bool:
+            return any(_DHS_VAR_RE.match(tok.lower()) for tok in _IDENT_RE.findall(s))
+
+        def try_resolve(m):
+            var = m.group(1).lower()
+            val = m.group(2)
+            if var not in self.replace_conds:
+                return m.group(0)
+            candidates = self.replace_conds[var].get(val, [])
+            if not candidates:
+                return m.group(0)
+            dhs_cands = [c for c in candidates if _has_dhs_var(c)]
+            chosen = dhs_cands[-1] if dhs_cands else candidates[-1]
+            # One recursive pass to resolve any remaining intermediates
+            further = re.sub(r"\b([a-zA-Z_]\w*)\s*==\s*(-?\d+)\b", try_resolve, chosen)
+            return f"({further})"
+
+        return re.sub(r"\b([a-zA-Z_]\w*)\s*==\s*(-?\d+)\b", try_resolve, condition)
+
+    def get_universe_restrictions(self) -> list:
+        """Return deduplicated, resolved universe restrictions for this .do file.
+
+        All keep if / drop if statements are file-level and therefore shared by
+        every indicator computed by that file.
+        """
+        seen: set = set()
+        result = []
+        for entry in self._raw_keepdrops:
+            resolved = self._resolve_condition(entry["condition"])
+            key = (entry["type"], resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append({
+                "type": entry["type"],
+                "condition": resolved,
+                "description": entry["description"],
+            })
+        return result
 
     # ------------------------------------------------------------------
     # Per-indicator DHS variable lookup
@@ -593,6 +708,25 @@ def main():
     n_passes = second_pass_inherit(indicators, parser_cache, file_index, dhs_to_ipums)
     n_after_pass2 = sum(1 for ind in indicators if ind.get("dhs_variables"))
 
+    # Extract universe restrictions for every indicator from its .do file parser.
+    # Restrictions are file-level (keep/drop statements apply to the whole file),
+    # so all indicators sharing a do_file get the same list.
+    for indicator in indicators:
+        do_file_raw = indicator.get("do_file")
+        if not do_file_raw:
+            indicator["universe_restrictions"] = []
+            continue
+        resolved = resolve_do_file(do_file_raw, file_index)
+        if resolved is None:
+            indicator["universe_restrictions"] = []
+            continue
+        path_key = tuple(sorted(str(p) for p in resolved))
+        parser = parser_cache.get(path_key)
+        if parser is None:
+            indicator["universe_restrictions"] = []
+            continue
+        indicator["universe_restrictions"] = parser.get_universe_restrictions()
+
     with open(INDICATORS_PATH, "w") as f:
         json.dump(indicators, f, indent=2)
 
@@ -634,6 +768,36 @@ def main():
         print(f"\n{sv}  [{ind['do_file']}]")
         print(f"  BEFORE ({len(old):2d}): {old}")
         print(f"  AFTER  ({len(new):2d}): {new}")
+
+    # Universe restrictions summary
+    n_with_restrictions = sum(1 for ind in indicators if ind.get("universe_restrictions"))
+    print("\n" + "=" * 70)
+    print(f"UNIVERSE RESTRICTIONS: {n_with_restrictions} indicators have restrictions")
+    print("=" * 70)
+
+    print("\n5 example indicators with restrictions:")
+    examples = [ind for ind in indicators if ind.get("universe_restrictions")][:5]
+    for ind in examples:
+        print(f"  {ind['stata_var']}: {ind['label']}")
+        for r in ind["universe_restrictions"]:
+            desc = f"  [{r['description']}]" if r["description"] else ""
+            print(f"    {r['type']} if {r['condition']}{desc}")
+
+    print("\n5 do files where keep/drop statements were found:")
+    seen_do_files: dict = {}
+    for ind in indicators:
+        for _r in ind.get("universe_restrictions", []):
+            df = ind.get("do_file", "")
+            if df and df not in seen_do_files:
+                sample = ind.get("universe_restrictions", [])
+                seen_do_files[df] = sample
+            if len(seen_do_files) >= 5:
+                break
+        if len(seen_do_files) >= 5:
+            break
+    for df, restrictions in seen_do_files.items():
+        conds = "; ".join(f"{r['type']} if {r['condition']}" for r in restrictions[:2])
+        print(f"  {df}: {conds}")
 
     return 0
 
