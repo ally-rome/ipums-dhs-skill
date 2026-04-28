@@ -89,7 +89,7 @@ After computing IPUMS microdata results, the skill also queries the StatCompiler
 
 - **Mortality rates (NMR, IMR, U5MR), TFR, and MMR** cannot be computed — they require specialized demographic methods. Direct users to DHS StatCompiler or published DHS reports.
 - **Standard errors and confidence intervals** are not computed. Results are weighted point estimates only.
-- **Universe restrictions** are partially handled through IPUMS NIU coding, but the tool does not apply explicit universe filters beyond DDI missing value detection.
+- **Universe restrictions** are extracted from DHS Code Share `.do` files into `dhs_stata_indicators.json` (`universe_restrictions` field) and applied as `--filter` flags. The `--filter` argument supports equality and inequality operators (`=`, `>=`, `<=`, `>`, `<`). Always single-quote filter specs with `>=`/`<=` to prevent shell redirection.
 - **Household-level statistics** require `--filter HHLINENO=1` to avoid overweighting large households.
 - **Older surveys** may have different respondent universes (e.g., ever-married women only). Compare across years with caution.
 - **Country access** must be approved per-country through the DHS Program. A 403 error means the user needs to request access at https://www.idhsdata.org.
