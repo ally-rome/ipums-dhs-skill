@@ -29,7 +29,7 @@ Compute custom statistics from IPUMS DHS survey microdata using natural language
 5. **Computes weighted statistics** using the correct DHS survey weights
 6. **Presents a formatted table** with human-readable labels and full replication documentation
 
-## Example CLI call 
+## Example CLI call
 ```bash
 python3 scripts/ipums_dhs.py table \
   --country <COUNTRY_CODE> \
