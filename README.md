@@ -61,6 +61,7 @@ The script downloads microdata via the IPUMS DHS extract API, then:
 - **Auto-scales z-score variables** — DHS anthropometric measures stored as integers × 100 are detected and rescaled so thresholds like "below -2 SD" work correctly
 - **Auto-detects variable type** — categorical variables get full frequency tables; continuous variables get weighted means, medians, or proportions below a threshold
 - **Filters for household-level statistics** — `--filter HHLINENO=1` counts each household once, preventing large households from being overweighted
+- **Applies universe restrictions** — for indicators with defined denominators (e.g., vaccination rates restricted to children 12–23 months), the skill reads restrictions from the Stata indicator index and applies them automatically as `--filter` flags
 - **Computes weighted statistics** using the correct DHS survey weights (PERWEIGHT, HHWEIGHT, or PERWEIGHTMN depending on the unit)
 
 ### Cross-referencing with StatCompiler
@@ -117,7 +118,7 @@ ipums-dhs-skill/
 
 - **Mortality rates (NMR, IMR, U5MR), TFR, and MMR** cannot be computed — they require specialized demographic methods. Use [DHS StatCompiler](https://www.statcompiler.com) for these.
 - **Standard errors and confidence intervals** are not computed. Results are weighted point estimates only.
-- **Universe restrictions** are partially handled through IPUMS NIU coding but not explicitly enforced beyond DDI missing value detection.
+- **Universe restrictions** are extracted from DHS Code Share `.do` files into `dhs_stata_indicators.json` and applied automatically as `--filter` flags. The `--filter` argument supports equality and inequality operators.
 - **Older surveys** may have different respondent universes (e.g., ever-married women only). The XLSX output includes a comparability warning for multi-year results.
 - **Country access** is per-country through the DHS Program. A 403 error means access hasn't been approved at https://www.idhsdata.org.
 - **Extract processing time** varies from 30 seconds to several minutes depending on IPUMS server load.
