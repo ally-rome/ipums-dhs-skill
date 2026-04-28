@@ -39,7 +39,7 @@ python3 scripts/ipums_dhs.py table \
   --by <BREAKDOWN_VARIABLE> \
   --filter '<FILTER_CONDITION>' \
   --universe "<UNIVERSE_DESCRIPTION>" \
-  --output ~/Desktop/results.xlsx
+  --output ~/results.xlsx
 ```
 
 ## table command arguments
