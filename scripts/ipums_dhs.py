@@ -1319,8 +1319,6 @@ def _write_xlsx_output(
     variables_requested: list[str],
     replication_vars: dict,
     missing_stats: dict,
-    filter_var: Optional[str] = None,
-    filter_val=None,
     median: bool = False,
     universe_description: Optional[str] = None,
 ) -> str:
@@ -1587,8 +1585,6 @@ def _print_replication(
     extract_vars: list[str],
     variables_requested: list[str],
     replication_vars: dict,
-    filter_var: Optional[str] = None,
-    filter_val=None,
     median: bool = False,
     universe_description: Optional[str] = None,
 ) -> None:
