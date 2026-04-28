@@ -1,20 +1,22 @@
 # IPUMS DHS Microdata Skill
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that queries IPUMS DHS individual-level survey microdata to answer plain-language questions about health and demographics in low- and middle-income countries.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that answers plain-language questions about health and demographics in low- and middle-income countries using DHS survey microdata.
 
-This skill extends the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler) by accessing ~16,500 unique harmonized variables from IPUMS DHS instead of StatCompiler's pre-computed indicators. This enables custom cross-tabulations, breakdowns by any available variable, and access to variables that StatCompiler doesn't offer.
+This skill extends the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler), which returns pre-computed official DHS indicators. This skill accesses the underlying individual-level survey data (~16,500 unique IPUMS DHS variables), enabling custom cross-tabulations, breakdowns by any available variable, and access to variables that StatCompiler doesn't offer.
 
-Ask a question like **"What is the stunting rate by wealth quintile in Kenya?"** and the skill will identify the correct variable, download the microdata from the IPUMS API, compute weighted statistics, and return formatted results with full replication documentation.
+## Examples
 
-## What it does
+```
+/dhs-ipums stunting rate by wealth quintile in Kenya
+/dhs-ipums percentage of households in Malawi with electricity
+/dhs-ipums contraceptive use by education level in Nigeria, save to xlsx
+/dhs-ipums median age at first marriage for women in Bangladesh by education
+/dhs-ipums compare stunting across Ghana surveys over time, save to xlsx
+```
 
-1. **Finds the right variable** from 1,225 DHS Code Share indicators (with pre-resolved IPUMS variable names) and ~16,500 unique IPUMS DHS variables via searchable codebooks
-2. **Downloads survey microdata** from the IPUMS DHS API for the correct country and survey year
-3. **Computes weighted statistics** — proportions, means, medians, and cross-tabulations with automatic missing value handling
-4. **Returns formatted results** with replication documentation, and exports to Excel if requested
-5. **Cross-references with StatCompiler** to validate computed results against official published DHS indicator values
+Include "save to xlsx" to get an Excel file with formatted tables and replication documentation.
 
-## Quick Start
+## Setup
 
 ### Prerequisites
 
@@ -22,134 +24,87 @@ Ask a question like **"What is the stunting rate by wealth quintile in Kenya?"**
 - An [IPUMS DHS account](https://www.idhsdata.org) with data access approved for the countries you want to query
 - An IPUMS API key ([request one here](https://account.ipums.org/api_keys))
 
-### Setup
+### Installation
 
 ```bash
+# Install this skill
 git clone https://github.com/ally-rome/ipums-dhs-skill.git ~/.claude/skills/dhs-ipums
 pip install -r ~/.claude/skills/dhs-ipums/requirements.txt
 export IPUMS_API_KEY=your_api_key_here
-```
 
-### Companion skill (recommended)
-
-For automatic cross-referencing of results against published DHS values, also install the StatCompiler skill:
-
-```bash
+# Also install the StatCompiler skill (recommended, for cross-referencing results)
 git clone https://github.com/stevenbrownstone-givewell/claude-statcompiler.git ~/.claude/skills/dhs-data
 ```
 
-### Usage with Claude Code
+## How It Works
 
-Install as a Claude Code skill, then invoke with `/dhs-ipums`:
+### Finding the right variable
 
-- `/dhs-ipums stunting rate by wealth quintile in Kenya`
-- `/dhs-ipums percentage of households in Malawi with electricity`
-- `/dhs-ipums vaccination coverage in Tanzania, save to xlsx`
-- `/dhs-ipums contraceptive use by education level in Nigeria`
-- `/dhs-ipums median years of education for women in Ghana by wealth quintile`
-- `/dhs-ipums compare stunting across Kenya surveys over time, save to xlsx`
+The skill searches 1,225 indicators from the [DHS Code Share Project](https://github.com/DHSProgram/DHS-Indicators-Stata), each with a human-readable label (e.g., "Stunted child under 5 years"), the IPUMS variable name, the DHS file type, and the source Stata `.do` file. When a match is found, the IPUMS variable is used directly — no manual lookup needed.
 
-To get an Excel file with formatted tables and replication documentation, include "save to xlsx" or "save to Excel" in your question.
+If the topic isn't covered by those 1,225 indicators (country-specific modules, uncommon variables, exploratory analysis), the skill falls back to keyword-searching IPUMS codebook files covering all ~16,500 variables.
 
-### Direct CLI usage
+A pre-scraped availability index (`dhs_availability.json`) maps DHS recode names to IPUMS names and stores which countries/years have each variable, so the script jumps directly to the right survey without trial-and-error API calls.
+
+### Computing statistics
+
+The script downloads microdata via the IPUMS DHS extract API, then:
+
+- **Detects and removes missing values** by parsing the DDI XML codebook for sentinel codes (NIU, missing, flagged, don't know, etc.)
+- **Auto-scales z-score variables** — DHS anthropometric measures stored as integers × 100 are detected and rescaled so thresholds like "below -2 SD" work correctly
+- **Auto-detects variable type** — categorical variables get full frequency tables; continuous variables get weighted means, medians, or proportions below a threshold
+- **Filters for household-level statistics** — `--filter HHLINENO=1` counts each household once, preventing large households from being overweighted
+- **Computes weighted statistics** using the correct DHS survey weights (PERWEIGHT, HHWEIGHT, or PERWEIGHTMN depending on the unit)
+
+### Cross-referencing with StatCompiler
+
+After presenting IPUMS results, the skill queries the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler) for the same indicator, country, and survey year. If both sources produce similar values, the computation is validated. If they differ, possible reasons are noted. The StatCompiler skill must be installed at `~/.claude/skills/dhs-data` for this to work.
+
+### Output
+
+Terminal output includes formatted tables with value codes and labels, an Overall row for breakdowns, and a replication block citing the source, sample, weight, variable links, and missing codes excluded.
+
+Excel output (`save to xlsx`) adds bordered tables, a missing values summary with per-code counts, and a comparability warning for multi-year results.
+
+## Direct CLI Usage
+
+The Python script can also be used without Claude Code:
 
 ```bash
-# List available surveys for a country
+# List available surveys
 python3 scripts/ipums_dhs.py samples KE
 
-# Search for variables by keyword
+# Search for variables
 python3 scripts/ipums_dhs.py search "height for age"
 
-# Compute weighted statistics with breakdown
+# Compute statistics
 python3 scripts/ipums_dhs.py table \
   --country KE --survey latest \
   --variables HWHAZWHO --unit children \
-  --by WEALTHQ --below -2
-
-# Household-level statistic (filter to household heads)
-python3 scripts/ipums_dhs.py table \
-  --country MW --survey latest \
-  --variables ELECTRCHH --unit household_members \
-  --filter HHLINENO=1
-
-# Weighted median
-python3 scripts/ipums_dhs.py table \
-  --country NG --survey latest \
-  --variables EDYRTOTAL --unit women \
-  --median --by WEALTHQ
-
-# Save to Excel
-python3 scripts/ipums_dhs.py table \
-  --country NG --survey latest \
-  --variables UNMETNEED3 --unit women \
-  --by EDUCLVL --output results.xlsx
-
-# Trend over time
-python3 scripts/ipums_dhs.py table \
-  --country GH --survey all \
-  --variables HWHAZWHO --unit children \
-  --below -2
+  --by WEALTHQ --below -2 --output results.xlsx
 ```
+
+Run `python3 scripts/ipums_dhs.py table --help` for all options including `--median`, `--filter`, `--survey all`, and more.
 
 ## Project Structure
 
 ```
 ipums-dhs-skill/
-├── CLAUDE.md                   # Project context for Claude Code
-├── SKILL.md                    # Instructions for Claude Code skill usage
-├── requirements.txt            # Python dependencies
+├── CLAUDE.md                          # Project context for Claude Code
+├── SKILL.md                           # Skill instructions and workflow
+├── requirements.txt                   # Python dependencies
 ├── scripts/
-│   ├── ipums_dhs.py                 # Core CLI (samples, search, table commands)
-│   ├── scrape_variables.py          # Scrapes IPUMS DHS variable browser + availability
-│   ├── build_stata_indicator_index.py  # Converts IndicatorList.xlsx → JSON
-│   └── extract_stata_dhs_vars.py    # Enriches JSON with DHS vars via .do file BFS
+│   ├── ipums_dhs.py                   # Core CLI (samples, search, table)
+│   ├── scrape_variables.py            # Scrapes IPUMS DHS variable browser
+│   ├── build_stata_indicator_index.py # Converts IndicatorList.xlsx → JSON
+│   └── extract_stata_dhs_vars.py      # Enriches JSON with DHS vars from .do files
 ├── references/
-│   ├── dhs_codebook_women.md          # 9,270 variables
-│   ├── dhs_codebook_children.md       # 11,146 variables
-│   ├── dhs_codebook_births.md         # 7,899 variables
-│   ├── dhs_codebook_men.md            # 3,741 variables
-│   ├── dhs_codebook_household_members.md  # 2,284 variables
 │   ├── dhs_stata_indicators.json      # 1,225 indicators with IPUMS mappings
 │   ├── dhs_availability.json          # Per-variable availability + DHS source names
+│   ├── dhs_codebook_*.md             # Variable codebooks (one per unit of analysis)
 │   └── dhs_sample_ids.md             # Sample IDs from IPUMS API
-└── data/                       # Cached extracts (gitignored)
+└── data/                              # Cached extracts (gitignored)
 ```
-
-## How It Works
-
-### Variable selection
-
-The skill uses two approaches to find the right variable:
-
-**Stata indicator index (primary):** The skill first searches `dhs_stata_indicators.json`, which contains 1,225 indicators from the [DHS Code Share Project](https://github.com/DHSProgram/DHS-Indicators-Stata). Each indicator has a human-readable label, its source `.do` file, DHS file type, and — for ~85% of indicators — pre-resolved `dhs_variables` (DHS recode names) and `ipums_variables` (IPUMS variable names). When a match is found, the IPUMS variable names are used directly for the extract with no additional lookup.
-
-**Codebook search (fallback):** For variables not covered by the Stata indicator index — country-specific modules, less common indicators, or exploratory analysis — the skill searches the IPUMS codebook files (`references/dhs_codebook_{unit}.md`) by keyword. If the user specified a unit, it searches only that codebook. If not, it searches all five and shows the user which units have relevant variables, asking which to use. It confirms the variable with the user before proceeding.
-
-### Survey selection and fallback
-
-When `--survey latest` is used, the script:
-
-1. Checks `dhs_availability.json` for the newest survey year that has all requested variables
-2. Submits the extract to that specific survey — no trial-and-error
-3. If the availability data doesn't cover a variable, falls back to trying each survey from newest to oldest
-4. If a variable isn't available in any survey, reports which surveys were tried and suggests checking the IPUMS website
-5. If the API returns 403, reports that the user's IPUMS account doesn't have access to that country's data
-
-### Automatic data handling
-
-- **Missing value detection:** Parses the DDI XML codebook that accompanies each extract to identify sentinel codes — NIU (not in universe), missing, flagged, don't know, out of plausible limits, etc. These are removed before computing statistics.
-- **Z-score auto-scaling:** DHS anthropometric variables (e.g., HWHAZWHO for height-for-age) are stored as integers × 100. The script detects this from the DDI label and value range and auto-divides by 100 so that thresholds like `--below -2` work correctly.
-- **Categorical vs continuous detection:** If more than half of a variable's unique values have DDI labels, it's treated as categorical (full frequency table). Otherwise it's treated as continuous (weighted mean, median, or proportion below threshold).
-- **Household head filtering:** For household-level statistics (e.g., "percentage of households with electricity"), `--filter HHLINENO=1` filters to one row per household, preventing large households from being overweighted.
-
-### Cross-reference with StatCompiler
-
-After computing results from IPUMS microdata, the skill also queries the [StatCompiler skill](https://github.com/stevenbrownstone-givewell/claude-statcompiler) (`/dhs-data`) to retrieve the official published DHS indicator value for the same country and survey year. This serves as built-in validation — if both sources produce similar values, the computation is likely correct. If values differ significantly, possible reasons are noted (different indicator definitions, universe restrictions, or survey years). The StatCompiler skill must be installed at `~/.claude/skills/dhs-data` for this feature to work.
-
-### Output
-
-- **Terminal output:** Formatted tables with value codes and labels (e.g., "Poorest (1)"), an Overall row for breakdown tables, and a replication block with source, sample, weight, variable links, missing codes excluded, and data transformations applied.
-- **Excel output (`--output`):** Formatted XLSX with bordered tables, a title row, replication block, missing values summary with per-code counts, and a comparability warning for multi-year outputs.
 
 ## Limitations
 
@@ -162,48 +117,25 @@ After computing results from IPUMS microdata, the skill also queries the [StatCo
 
 ## How the Reference Data Was Built
 
-The reference files in `references/` were built through a multi-step data pipeline. All steps are reproducible using the scripts in `scripts/`.
+All reference files are reproducible. See `CLAUDE.md` for technical details on the data pipeline.
 
-### Variable codebooks
+**Variable codebooks and availability:** Scraped from the [IPUMS DHS variable browser](https://www.idhsdata.org/idhs-action/variables/group) — group pages for variable names/labels, individual detail pages for country/year availability and DHS source variable names.
 
-The five codebook files were scraped from the [IPUMS DHS variable browser](https://www.idhsdata.org/idhs-action/variables/group) using `scripts/scrape_variables.py`. The scraper opens a session for each unit of analysis, discovers all topic groups from the sidebar, and parses each group page to extract variable names, labels, and preselected status. Groups are paginated at 60 variables per page; the scraper follows pagination automatically.
-
-### Variable availability and DHS source names
-
-The `--availability` flag on the scraper triggers a second pass that visits each variable's individual detail page (e.g., `https://www.idhsdata.org/idhs-action/variables/HWHAZWHO`). From each page it parses:
-
-- **Country/year availability** — which surveys contain the variable, extracted from the `#availability_section`
-- **DHS source variable name** — the original DHS recode variable name (e.g., `HW70`), parsed from the `<span>` tag after the variable heading
-
-This data is stored in `dhs_availability.json` and enables two features: smart sample selection (jumping directly to the right survey year) and mapping between DHS recode names and IPUMS variable names.
-
-The full availability scrape visits ~16,500 individual variable pages at 0.3 seconds each and takes approximately 8 hours.
-
-### Stata indicator index
-
-1,225 indicator definitions were extracted from the [DHS Code Share Project](https://github.com/DHSProgram/DHS-Indicators-Stata) in two steps:
-
-1. `scripts/build_stata_indicator_index.py` converts the IndicatorList.xlsx (one sheet per chapter, available from the Code Share Project) into `dhs_stata_indicators.json` with fields: `stata_var`, `label`, `chapter`, `do_file`, `dhs_file`, `notes`.
-
-2. `scripts/extract_stata_dhs_vars.py` clones the Stata repo, builds a variable dependency graph for each `.do` file using regex parsing of `gen`/`replace`/`recode`/`foreach`/`forvalues` statements, and runs a BFS per indicator to trace which raw DHS recode variables (e.g. `h3`, `h5`, `h7`) feed into each output variable. It then reverse-maps those DHS names to IPUMS variable names using `dhs_availability.json`. Both root-level and `DHS8/` subfolder versions of each `.do` file are merged into a single dependency graph.
-
-### Regenerating reference data
+**Stata indicator index:** Extracted from the [DHS Code Share Project](https://github.com/DHSProgram/DHS-Indicators-Stata). The IndicatorList.xlsx provides indicator metadata; the `.do` files provide the actual computation logic. A BFS dependency tracer resolves which DHS recode variables feed into each indicator and maps them to IPUMS names.
 
 ```bash
-# Re-scrape codebooks and availability (takes ~8 hours for all units)
-python3 scripts/scrape_variables.py all --availability
-
-# Rebuild Stata indicator index (requires IndicatorList.xlsx from DHS Code Share Project)
-python3 scripts/build_stata_indicator_index.py
-python3 scripts/extract_stata_dhs_vars.py
+# Regenerate all reference data
+python3 scripts/scrape_variables.py all --availability    # ~8 hours
+python3 scripts/build_stata_indicator_index.py             # seconds
+python3 scripts/extract_stata_dhs_vars.py                  # ~1 minute
 ```
 
 ## References
 
 - [IPUMS DHS](https://www.idhsdata.org) — Harmonized DHS microdata
-- [DHS Code Share Project (Stata)](https://github.com/DHSProgram/DHS-Indicators-Stata) — Official indicator computation code
-- [Guide to DHS Statistics (DHS-8)](https://www.dhsprogram.com/pubs/pdf/DHSG1/Guide_to_DHS_Statistics_DHS-8.pdf) — Official indicator definitions and methodology
-- [What Every IPUMS-DHS User Should Know](https://www.idhsdata.org/idhs/user_know.shtml) — Essential guidance on weights, household statistics, and universe restrictions
+- [DHS Code Share Project](https://github.com/DHSProgram/DHS-Indicators-Stata) — Official indicator computation code
+- [Guide to DHS Statistics (DHS-8)](https://www.dhsprogram.com/pubs/pdf/DHSG1/Guide_to_DHS_Statistics_DHS-8.pdf) — Indicator definitions and methodology
+- [What Every IPUMS-DHS User Should Know](https://www.idhsdata.org/idhs/user_know.shtml) — Weights, household statistics, universe restrictions
 - [IPUMS API Documentation](https://developer.ipums.org/docs/v2/) — Extract API reference
 
 ## Citation
