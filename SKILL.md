@@ -1,3 +1,9 @@
+---
+name: dhs-ipums
+description: "Compute custom statistics from IPUMS DHS survey microdata. Use when the user wants DHS health or demographics data with custom cross-tabulations, breakdowns by any variable, household-level statistics, or Excel output with replication documentation. Handles requests like stunting by wealth quintile in Kenya, contraceptive use by education in Nigeria, or household electricity access in Malawi."
+argument-hint: "<plain-language question about DHS health/demographics data>"
+---
+
 # IPUMS DHS Microdata
 
 Trigger: /dhs-ipums
