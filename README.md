@@ -63,6 +63,8 @@ The script downloads microdata via the IPUMS DHS extract API, then:
 - **Filters for household-level statistics** — `--filter HHLINENO=1` counts each household once, preventing large households from being overweighted
 - **Applies universe restrictions** — for indicators with defined denominators (e.g., vaccination rates restricted to children 12–23 months), the skill reads restrictions from the Stata indicator index and applies them automatically as `--filter` flags
 - **Computes weighted statistics** using the correct DHS survey weights (PERWEIGHT, HHWEIGHT, or PERWEIGHTMN depending on the unit)
+- **Reports fieldwork timing** — interview date range is computed from the data and included in the replication block (e.g., "Fieldwork period: February 2022 – July 2022"). Interview-date variable names differ by unit of analysis and are auto-added to every extract.
+- **Optionally adds a covariate set for regression analysis** — pass `--covariates` to include a standard panel of DHS covariates (urban/rural, education, household size, number of children under 5, age, wealth quintile, plus child sex/age in months for child-level units) in the saved CSV. These are not used in the script's tabulation or weighted statistics, and they don't affect which survey year is selected — they're there for the user's own modeling.
 
 ### Cross-referencing with StatCompiler
 
@@ -70,9 +72,9 @@ After presenting IPUMS results, the skill queries the [StatCompiler skill](https
 
 ### Output
 
-Terminal output includes formatted tables with value codes and labels, an Overall row for breakdowns, and a replication block citing the source, sample, weight, variable links, and missing codes excluded.
+Terminal output includes formatted tables with value codes and labels, an Overall row for breakdowns, and a replication block citing the source, sample, fieldwork period (e.g., "February 2022 – July 2022"), weight, variable links, and missing codes excluded. The "Covariates included" row appears when `--covariates` is passed.
 
-Excel output (`save to xlsx`) adds bordered tables, a missing values summary with per-code counts, and a comparability warning for multi-year results.
+Excel output (`save to xlsx`) adds bordered tables, a missing values summary with per-code counts, and a comparability warning for multi-year results. The fieldwork period and (when applicable) covariates included rows are mirrored in the XLSX replication block.
 
 ## Direct CLI Usage
 
@@ -90,9 +92,15 @@ python3 scripts/ipums_dhs.py table \
   --country KE --survey latest \
   --variables HWHAZWHO --unit children \
   --by WEALTHQ --below -2 --output results.xlsx
+
+# Same query but also include standard covariates in the saved CSV for regression
+python3 scripts/ipums_dhs.py table \
+  --country KE --survey latest \
+  --variables HWHAZWHO --unit children \
+  --below -2 --covariates --output results.xlsx
 ```
 
-Run `python3 scripts/ipums_dhs.py table --help` for all options including `--median`, `--filter`, `--survey all`, and more.
+Run `python3 scripts/ipums_dhs.py table --help` for all options including `--median`, `--filter`, `--survey all`, `--covariates`, and more.
 
 ## Project Structure
 
