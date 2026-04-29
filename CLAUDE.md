@@ -30,7 +30,7 @@ A Claude Code skill that queries IPUMS DHS individual-level survey microdata to 
 
 ## Scripts
 
-- `scripts/ipums_dhs.py` — Core CLI with three commands: `samples`, `search`, and `table`. Handles extract submission, DDI parsing, weighted statistics, z-score scaling, survey fallback, XLSX output, and replication citations.
+- `scripts/ipums_dhs.py` — Core CLI with three commands: `samples`, `search`, and `table`. Handles extract submission, DDI parsing, weighted statistics, z-score scaling, survey fallback, XLSX output, replication citations, fieldwork-period reporting, and optional covariate extraction (`--covariates`).
 - `scripts/scrape_variables.py` — Scrapes the IPUMS DHS variable browser to generate codebook files and availability data. Run with `--availability` to also fetch per-variable detail pages for country/year availability and DHS source names.
 - `scripts/build_stata_indicator_index.py` — Converts the DHS Code Share IndicatorList.xlsx to `dhs_stata_indicators.json`. Run once when the xlsx is updated.
 - `scripts/extract_stata_dhs_vars.py` — Clones the DHS-Indicators-Stata repo and enriches each indicator in the JSON with per-indicator DHS recode variable names and IPUMS mappings via BFS dependency tracing through the Stata .do files.
@@ -84,6 +84,14 @@ After computing IPUMS microdata results, the skill also queries the StatCompiler
 - DHS variable browser: https://www.idhsdata.org/idhs-action/variables/group
 - Guide to DHS Statistics (DHS-8): https://www.dhsprogram.com/pubs/pdf/DHSG1/Guide_to_DHS_Statistics_DHS-8.pdf
 - What Every IPUMS-DHS User Should Know: https://www.idhsdata.org/idhs/user_know.shtml
+
+## Auto-added Variables
+
+Some variables are added to every extract on top of what the user requested. They're tracked in a "droppable set" — if the IPUMS API rejects the extract because one of these isn't in the chosen sample (or its name has changed), it's stripped from the request and the same sample is retried. Crucially, none of them drive survey selection (only `--variables` does), so falling back to an older year because a covariate is missing never happens.
+
+- **Fieldwork-period vars** (`_FIELDWORK_VARS_BY_UNIT` in `ipums_dhs.py`) — interview year + month, used to print `Fieldwork period: February 2022 – July 2022` in the replication block. Variable names are unit-specific: `INTYEAR`/`MONTHINT` for women/children/births, `HHINTYR`/`HHINTMO` for household_members, `INTYEARMN`/`MONTHINTMN` for men. CMC variants (`INTDATECMC`, `HHINTCMC`, `INTDATECMCMN`) serve as fallback parsing inside `_format_fieldwork_period` if the year/month columns aren't present.
+
+- **Covariate set** (`_COVARIATES_BY_UNIT`, opt-in via `--covariates`) — a standard panel used for downstream regression: urban/rural, respondent (or member) education, household size, number of children under 5, age, and wealth quintile, plus child sex (children/births) and child age in months (children only). Variable names are again unit-specific (`URBAN`/`URBANHH`/`URBANMN`, `EDUCLVL`/`EDLEVEL`/`EDUCLVLMN`, etc.). These are saved into the CSV but **excluded from any tabulation, frequency table, or weighted statistic**. There is intentionally no `HHEDLVL` — IPUMS DHS doesn't expose a single harmonized "household head's education" field; users who need it can derive it via `HHEADLINENO` + each member's `EDLEVEL`.
 
 ## Known Limitations
 
