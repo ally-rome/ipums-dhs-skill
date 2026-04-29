@@ -29,7 +29,7 @@ Compute custom statistics from IPUMS DHS survey microdata using natural language
 5. **Computes weighted statistics** using the correct DHS survey weights
 6. **Presents a formatted table** with human-readable labels and full replication documentation
 
-## Example CLI call
+## Example CLI call 
 ```bash
 python3 scripts/ipums_dhs.py table \
   --country <COUNTRY_CODE> \
@@ -129,6 +129,8 @@ Follow these steps in order for every new question. Do not skip steps or use cac
    Note: If the restrictions include loop-expansion artifacts (e.g. `keep if \`lvar'==\`lcat'`) or data-cleaning drops (e.g. `drop if b3_==.`), skip those — apply only restrictions that define the denominator population (age group, sex, marital status, living status).
 
    If no universe_restrictions are present, pass `--universe "No additional universe restrictions applied (full extract after DDI missing value filtering)"`.
+
+   **Pass `--covariates` if the user mentions regression, covariates, controls, predictors, or analysis-ready data.** This adds a standard set of DHS covariates (URBAN, WEALTHQ/WEALTHQHH, EDUCLVL, HHEDLVL, HHMEMBERS, CHUNDER5, AGE; plus KIDSEX/KIDCURAGEMO for children/births) to the extract. They appear in the saved CSV for the user's own modeling but are not used in the script's tabulation or weighted statistics.
 
    The script handles missing values, z-score scaling, survey fallback, and availability lookup automatically. Do not run the samples command to check survey availability — the table command uses dhs_availability.json to find the correct survey automatically.
 
