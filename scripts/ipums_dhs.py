@@ -78,6 +78,46 @@ _INDICATOR_NAMES = {
     "HWWHZWHO": "Wasted", "HWWHZNCHS": "Wasted",
 }
 
+# Auto-added to every extract so the replication block can report the
+# survey's interview-month range. Excluded from statistical computation.
+# IPUMS DHS uses different interview-date variable names per unit of analysis;
+# the keys are (year_var, month_var, cmc_var). The CMC variant is used as a
+# fallback inside _format_fieldwork_period when the year+month columns aren't
+# in the returned data.
+_FIELDWORK_VARS_BY_UNIT: dict[str, tuple[str, str, str]] = {
+    "women":             ("INTYEAR",   "MONTHINT",   "INTDATECMC"),
+    "children":          ("INTYEAR",   "MONTHINT",   "INTDATECMC"),
+    "births":            ("INTYEAR",   "MONTHINT",   "INTDATECMC"),
+    "household_members": ("HHINTYR",   "HHINTMO",    "HHINTCMC"),
+    "men":               ("INTYEARMN", "MONTHINTMN", "INTDATECMCMN"),
+}
+
+
+def _fieldwork_vars_for_unit(unit: str) -> list[str]:
+    """Return the [year_var, month_var] pair to auto-add to extracts for `unit`."""
+    triple = _FIELDWORK_VARS_BY_UNIT.get(unit)
+    return list(triple[:2]) if triple else []
+
+# Standard DHS covariates added to the extract when --covariates is passed.
+# Included in the saved CSV for downstream regression analysis but excluded
+# from any tabulation, frequency table, or weighted statistic computed here.
+# IPUMS DHS uses unit-specific names for many of these (URBANHH, AGEMN, etc.),
+# so the list is fully unit-aware. There's no harmonized "household head's
+# education" variable in IPUMS DHS (HHEDLVL), so it isn't included; users who
+# need it can derive it themselves via HHEADLINENO + each member's EDLEVEL.
+_COVARIATES_BY_UNIT: dict[str, list[str]] = {
+    "women":             ["URBAN",   "EDUCLVL",   "HHMEMTOTAL",   "HHKIDLT5", "AGE",    "WEALTHQ"],
+    "children":          ["URBAN",   "EDUCLVL",   "HHMEMTOTAL",   "HHKIDLT5", "AGE",    "WEALTHQ",   "KIDSEX", "KIDCURAGEMO"],
+    "births":            ["URBAN",   "EDUCLVL",   "HHMEMTOTAL",   "HHKIDLT5", "AGE",    "WEALTHQ",   "KIDSEX"],
+    "household_members": ["URBANHH", "EDLEVEL",   "HHMEMBERS",    "KIDLT5NO", "HHAGE",  "WEALTHQHH"],
+    "men":               ["URBANMN", "EDUCLVLMN", "HHMEMTOTALMN",             "AGEMN",  "WEALTHQMN"],
+}
+
+
+def _covariate_vars_for_unit(unit: str) -> list[str]:
+    """Return the standard DHS covariate variable list for a given unit."""
+    return list(_COVARIATES_BY_UNIT.get(unit, []))
+
 CODEBOOK_FILES = {
     "women": REFERENCES_DIR / "dhs_codebook_women.md",
     "men": REFERENCES_DIR / "dhs_codebook_men.md",
@@ -705,15 +745,80 @@ def _require_api_key() -> str:
     return key
 
 
+def _format_fieldwork_period(
+    df: pd.DataFrame, ddi_missing: dict, unit: str
+) -> Optional[str]:
+    """
+    Build a "March 2022 – August 2022" string from the unit-appropriate
+    year/month interview vars, falling back to the CMC variant if those aren't
+    present. Returns None if no usable interview-date columns are in the
+    DataFrame. Variable names differ per unit (see _FIELDWORK_VARS_BY_UNIT).
+    """
+    import calendar
+
+    triple = _FIELDWORK_VARS_BY_UNIT.get(unit)
+    if not triple:
+        return None
+    year_var, month_var, cmc_var = triple
+
+    def _drop_missing(s: pd.Series, missing_codes: set) -> pd.Series:
+        if missing_codes:
+            s = s[~s.isin(missing_codes)]
+        return s.dropna()
+
+    if year_var in df.columns and month_var in df.columns:
+        valid = df[[year_var, month_var]].dropna()
+        valid = valid[~valid[year_var].isin(ddi_missing.get(year_var, set()))]
+        valid = valid[~valid[month_var].isin(ddi_missing.get(month_var, set()))]
+        if valid.empty:
+            return None
+        keys = valid[year_var].astype(int) * 12 + valid[month_var].astype(int)
+        idx_min, idx_max = keys.idxmin(), keys.idxmax()
+        min_y, min_m = int(valid.loc[idx_min, year_var]), int(valid.loc[idx_min, month_var])
+        max_y, max_m = int(valid.loc[idx_max, year_var]), int(valid.loc[idx_max, month_var])
+    elif cmc_var in df.columns:
+        cmc = _drop_missing(df[cmc_var], ddi_missing.get(cmc_var, set()))
+        if cmc.empty:
+            return None
+        # DHS CMC: months since Dec 1899, so CMC=1 is January 1900.
+        min_cmc, max_cmc = int(cmc.min()), int(cmc.max())
+        min_y, min_m = 1900 + (min_cmc - 1) // 12, ((min_cmc - 1) % 12) + 1
+        max_y, max_m = 1900 + (max_cmc - 1) // 12, ((max_cmc - 1) % 12) + 1
+    else:
+        return None
+
+    if not (1 <= min_m <= 12 and 1 <= max_m <= 12):
+        return None
+    start = f"{calendar.month_name[min_m]} {min_y}"
+    end = f"{calendar.month_name[max_m]} {max_y}"
+    if start == end:
+        return start
+    return f"{start} – {end}"
+
+
 def _is_unavailable_error(err: RuntimeError) -> bool:
-    """Return True if the error is a variable-availability rejection from the API."""
-    return "not available in any of the samples" in str(err)
+    """
+    Return True if the error is a variable-availability rejection from the API.
+
+    Two flavours both qualify so the retry-and-drop safety can react to either:
+    - "not available in any of the samples": variable exists in IPUMS DHS but
+      isn't in the chosen survey year.
+    - "Invalid variable name": the name doesn't exist at all (typo in an
+      auto-added var, or an IPUMS rename we haven't tracked yet).
+    """
+    msg = str(err)
+    return ("not available in any of the samples" in msg
+            or "Invalid variable name" in msg)
 
 
 def _unavailable_vars(err: RuntimeError) -> list[str]:
     """Extract variable names from a variable-availability error message."""
-    # Error text looks like: "['HWHAZWHO: This variable is not available...']"
-    return re.findall(r"\b([A-Z][A-Z0-9_]+)\b(?=: This variable is not available)", str(err))
+    msg = str(err)
+    # "['HWHAZWHO: This variable is not available...']"
+    names = re.findall(r"\b([A-Z][A-Z0-9_]+)\b(?=: This variable is not available)", msg)
+    # "Invalid variable name: HHEDLVL"
+    names += re.findall(r"Invalid variable name:\s*([A-Z][A-Z0-9_]+)", msg)
+    return names
 
 
 def _resolve_samples(country: str, survey: str, unit: str) -> list[str]:
@@ -914,12 +1019,29 @@ def cmd_table(args: argparse.Namespace) -> None:
     filters = [_parse_filter(s) for s in (args.filter_specs or [])]
     filter_vars = list(dict.fromkeys(f["var"] for f in filters))
 
-    # Build full variable list for extract: weight + by variable + all filter variables
+    # Build full variable list for extract: weight + by variable + all filter variables.
+    # The unit-specific fieldwork vars are auto-included for the replication
+    # block, and (when --covariates is passed) a standard covariate set is
+    # auto-included for downstream regression analysis. If any auto-added var
+    # is unavailable in the chosen sample, the submit-extract retry below
+    # drops it without walking back to older surveys (those vars don't drive
+    # survey selection).
+    fieldwork_vars = _fieldwork_vars_for_unit(unit)
+    covariates_requested = _covariate_vars_for_unit(unit) if args.covariates else []
     extract_vars = list(dict.fromkeys(
         variables_requested + [weight_col]
         + ([args.by] if args.by else [])
         + filter_vars
+        + fieldwork_vars
+        + covariates_requested
     ))
+
+    # Set of vars we may safely drop on availability errors: auto-added ones
+    # the user did not also request as a main/filter/by/weight variable.
+    user_required = set(variables_requested) | set(filter_vars) | {weight_col}
+    if args.by:
+        user_required.add(args.by)
+    droppable_set = (set(fieldwork_vars) | set(covariates_requested)) - user_required
 
     # 1. Build ordered candidate list (newest first) for fallback retries.
     #    For explicit sample IDs or "all", no fallback is attempted.
@@ -970,7 +1092,9 @@ def cmd_table(args: argparse.Namespace) -> None:
     # API limitation not present in other IPUMS collections (see CLAUDE.md).
     final = filepath = None
     sample_ids = None
-    for attempt, sample_ids in enumerate(candidates):
+    attempt = 0
+    while attempt < len(candidates):
+        sample_ids = candidates[attempt]
         print(f"  Trying: {', '.join(sample_ids)}")
         try:
             print(f"Submitting extract (variables: {', '.join(extract_vars)})...")
@@ -995,11 +1119,23 @@ def cmd_table(args: argparse.Namespace) -> None:
             if not _is_unavailable_error(e):
                 raise
             bad_vars = _unavailable_vars(e) or variables_requested
+            bad_set = set(bad_vars)
+            # If only auto-added vars (fieldwork or covariates the user didn't
+            # explicitly request) are unavailable, drop them and retry the same
+            # sample. Walking back to older surveys would be wrong — these vars
+            # don't affect the user's analysis, only metadata or downstream regression.
+            if bad_set and bad_set <= droppable_set:
+                extract_vars = [v for v in extract_vars if v not in bad_set]
+                droppable_set -= bad_set
+                print(f"  Auto-added vars {sorted(bad_set)} unavailable in "
+                      f"{', '.join(sample_ids)}; dropping and retrying same sample.")
+                continue
             remaining = candidates[attempt + 1:]
             if remaining:
                 next_ids = remaining[0]
                 print(f"  {', '.join(bad_vars)} not available in "
                       f"{', '.join(sample_ids)}. Trying {', '.join(next_ids)}...")
+                attempt += 1
             else:
                 available = [s["sample_id"] for s in all_unit_samples]
                 sys.exit(
@@ -1036,6 +1172,20 @@ def cmd_table(args: argparse.Namespace) -> None:
             flagged = {v: sorted(c) for v, c in ddi_missing.items() if v in extract_vars}
             if flagged:
                 print(f"  DDI missing codes: { {v: c for v, c in flagged.items()} }")
+
+    fieldwork_period = _format_fieldwork_period(df, ddi_missing, unit)
+    if fieldwork_period:
+        print(f"  Fieldwork period: {fieldwork_period}")
+
+    covariates_included: list[str] = []
+    if args.covariates:
+        covariates_included = [v for v in covariates_requested if v in df.columns]
+        covariates_missing_list = [v for v in covariates_requested if v not in df.columns]
+        if covariates_included:
+            print(f"  Covariates included: {', '.join(covariates_included)}")
+        if covariates_missing_list:
+            print(f"  Covariates not available in this sample: "
+                  f"{', '.join(covariates_missing_list)}")
 
     # 5c. Pre-load DDI value labels for --by variable (used in _print_table for labelled rows)
     by_value_labels: dict = {}
@@ -1185,6 +1335,12 @@ def cmd_table(args: argparse.Namespace) -> None:
 
     # 9. Replication block — collect DDI info for weight and by variables, then print
     for v in extract_vars:
+        if v not in df.columns:
+            # IPUMS occasionally silently omits an auto-added covariate when it
+            # isn't collected in the chosen survey; skip metadata for it rather
+            # than KeyError. The "Covariates not available" notice was already
+            # printed above.
+            continue
         if v not in replication_vars:
             v_label, v_raw_codes = ("", {})
             if not args.no_ddi_filter and ddi_path:
@@ -1237,6 +1393,8 @@ def cmd_table(args: argparse.Namespace) -> None:
         replication_vars=replication_vars,
         median=args.median,
         universe_description=universe_description,
+        fieldwork_period=fieldwork_period,
+        covariates_included=covariates_included,
     )
 
     if args.output and xlsx_results:
@@ -1255,6 +1413,8 @@ def cmd_table(args: argparse.Namespace) -> None:
             missing_stats=missing_stats,
             median=args.median,
             universe_description=universe_description,
+            fieldwork_period=fieldwork_period,
+            covariates_included=covariates_included,
         )
         print(f"  Saved to {out_path}")
 
@@ -1321,6 +1481,8 @@ def _write_xlsx_output(
     missing_stats: dict,
     median: bool = False,
     universe_description: Optional[str] = None,
+    fieldwork_period: Optional[str] = None,
+    covariates_included: Optional[list[str]] = None,
 ) -> str:
     """
     Write query results and provenance to a formatted Excel workbook.
@@ -1485,10 +1647,16 @@ def _write_xlsx_output(
     rep_rows = [
         ["Source", "IPUMS DHS (https://www.idhsdata.org)"],
         ["Sample", sample_line],
+    ]
+    if fieldwork_period:
+        rep_rows.append(["Fieldwork period", fieldwork_period])
+    rep_rows.extend([
         ["Weight", weight_col],
         ["Unit of analysis", unit],
         ["Universe", universe_description],
-    ]
+    ])
+    if covariates_included:
+        rep_rows.append(["Covariates included", ", ".join(covariates_included)])
     if median:
         rep_rows.append(["Statistic", "weighted median"])
     for v in extract_vars:
@@ -1587,6 +1755,8 @@ def _print_replication(
     replication_vars: dict,
     median: bool = False,
     universe_description: Optional[str] = None,
+    fieldwork_period: Optional[str] = None,
+    covariates_included: Optional[list[str]] = None,
 ) -> None:
     """Print a replication citation and variable details block."""
     unit_desc = UNIT_DESCRIPTIONS.get(unit, unit)
@@ -1602,9 +1772,13 @@ def _print_replication(
     print("\n--- Replication ---")
     print(f"Source: IPUMS DHS (https://www.idhsdata.org)")
     print(f"Sample: {sample_line}")
+    if fieldwork_period:
+        print(f"Fieldwork period: {fieldwork_period}")
     print(f"Weight: {weight_col}")
     print(f"Unit of analysis: {unit}")
     print(f"Universe: {universe_description}")
+    if covariates_included:
+        print(f"Covariates included: {', '.join(covariates_included)}")
     if median:
         print("Statistic: weighted median")
 
@@ -1735,6 +1909,19 @@ def main() -> None:
             "Human-readable description of the universe/denominator for the replication block "
             "(e.g. 'Living children age 12-23 months'). "
             "If omitted, constructed from --filter when present, or states no restriction."
+        ),
+    )
+    p_table.add_argument(
+        "--covariates",
+        action="store_true",
+        default=False,
+        help=(
+            "Add a standard set of DHS covariates to the extract for downstream "
+            "regression analysis (urban/rural, education, household size, number of "
+            "children under 5, age, wealth quintile; plus child sex/age in months for "
+            "children/births). The exact variable names are unit-specific (URBAN vs "
+            "URBANHH vs URBANMN, etc.) — see _COVARIATES_BY_UNIT in the source. "
+            "Included in the saved CSV; not used in tabulations or weighted statistics."
         ),
     )
 
